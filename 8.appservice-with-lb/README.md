@@ -660,6 +660,8 @@ Verify: **Networking** shows integration to **`subnet-appservice`**.
    - **Backend pool**: Add **FQDN** / hostname → **`<your-app-name>.azurewebsites.net`**
    - **Backend settings**: **HTTPS**, Port **443**, **Backend server certificate** / host: use hostname from backend pool (pick host name from backend address).
 5. **Configuration**: Routing rule — listener **HTTP:80** → backend pool + backend settings.
+
+>### Override with new host name - Yes
 6. **Review + create** (deployment ~10–15 minutes).
 
 ### Step 7 — Backend health probe
