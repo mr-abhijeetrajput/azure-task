@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3-Tier App — Azure</title>
+    <style>
+        body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+        h1 { color: #0078d4; }
+        .badge  { background: #0078d4; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; }
+        .badge-green { background: #107c10; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; }
+        .flash  { padding: 10px; border-radius: 4px; margin-bottom: 12px; display: none; }
+        .flash.success { background: #dff0d8; color: #3c763d; }
+        .flash.error   { background: #f2dede; color: #a94442; }
+        .error-box { background: #f2dede; padding: 12px; border-radius: 4px; color: #a94442; display: none; }
+        .add-form { display: flex; gap: 10px; margin-bottom: 24px; }
+        .add-form input  { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; }
+        .add-form button { background: #0078d4; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+        .add-form button:disabled { background: #aaa; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f3f3f3; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }
+        td { padding: 8px 10px; border-bottom: 1px solid #eee; }
+        .del-btn { background: #d9534f; color: white; border: none; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .arch { background: #f9f9f9; padding: 12px; border-radius: 6px; font-size: 12px; color: #555; margin-bottom: 20px; }
+        #item-count { color: #555; }
+        .spinner { color: #888; font-style: italic; }
+    </style>
+</head>
+<body>
+    <h1>📦 3-Tier Azure App</h1>
+
+    <div class="arch">
+        🌐 <strong>Blob Storage</strong> (this page)
+        → <span class="badge">AppGW</span>
+        → <span class="badge">Backend API :5001</span>
+        → <span class="badge-green">PostgreSQL (private)</span>
+        + <span class="badge-green">Key Vault (Managed Identity)</span>
+    </div>
+
+    <div id="flash" class="flash"></div>
+    <div id="error-box" class="error-box"></div>
+
+    <h3>Add Item</h3>
+    <div class="add-form">
+        <input type="text" id="item-name" placeholder="Enter item name..." />
+        <button id="add-btn" onclick="addItem()">Add</button>
+    </div>
+
+    <h3>Items from PostgreSQL (<span id="item-count">...</span>)</h3>
+    <div id="items-container"><p class="spinner">Loading...</p></div>
+
+    <script>
+        // Backend URL — AppGW public IP or DNS
+        // Update this to your AppGW public IP or custom domain
+        const BACKEND_URL = "http://4.187.141.189";
+
+        function showFlash(msg, type) {
+            const el = document.getElementById("flash");
+            el.textContent = msg;
+            el.className = `flash ${type}`;
+            el.style.display = "block";
+            setTimeout(() => { el.style.display = "none"; }, 3000);
+        }
+
+        function showError(msg) {
+            const el = document.getElementById("error-box");
+            el.textContent = `⚠️ ${msg}`;
+            el.style.display = msg ? "block" : "none";
+        }
+
+        function renderItems(items) {
+            document.getElementById("item-count").textContent = items.length;
+            const container = document.getElementById("items-container");
+
+            if (items.length === 0) {
+                container.innerHTML = '<p style="color:#666">No items yet. Add one above.</p>';
+                return;
+            }
+
+            let rows = items.map(item => `
+                <tr>
+                    <td>${item.id}</td>
+                    <td>${item.name}</td>
+                    <td>${item.created_at}</td>
+                    <td>
+                        <button class="del-btn" onclick="deleteItem(${item.id})">Delete</button>
+                    </td>
+                </tr>
+            `).join("");
+
+            container.innerHTML = `
+                <table>
+                    <thead><tr><th>ID</th><th>Name</th><th>Created</th><th></th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        }
+
+        async function loadItems() {
+            showError("");
+            try {
+                const resp = await fetch(`${BACKEND_URL}/api/items`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                renderItems(data.items || []);
+            } catch (e) {
+                document.getElementById("item-count").textContent = "?";
+                document.getElementById("items-container").innerHTML = "";
+                showError(`Could not reach backend API: ${e.message}`);
+            }
+        }
+
+        async function addItem() {
+            const input = document.getElementById("item-name");
+            const btn   = document.getElementById("add-btn");
+            const name  = input.value.trim();
+
+            if (!name) { showFlash("Item name cannot be empty", "error"); return; }
+
+            btn.disabled = true;
+            try {
+                const resp = await fetch(`${BACKEND_URL}/api/items`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name })
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                input.value = "";
+                showFlash(`Added: ${name}`, "success");
+                await loadItems();
+            } catch (e) {
+                showFlash(`Failed to add item: ${e.message}`, "error");
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteItem(id) {
+            if (!confirm("Delete?")) return;
+            try {
+                const resp = await fetch(`${BACKEND_URL}/api/items/${id}`, { method: "DELETE" });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                showFlash(`Deleted item #${id}`, "success");
+                await loadItems();
+            } catch (e) {
+                showFlash(`Failed to delete: ${e.message}`, "error");
+            }
+        }
+
+        // Enter key on input triggers add
+        document.getElementById("item-name").addEventListener("keydown", e => {
+            if (e.key === "Enter") addItem();
+        });
+
+        // Load on page start
+        loadItems();
+    </script>
+</body>
+</html>
